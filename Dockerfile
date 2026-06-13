@@ -21,6 +21,7 @@ RUN apt-get update \
         libicu-dev \
         libxml2-dev \
         libonig-dev \
+        jq \
     && docker-php-ext-install \
         intl \
         mbstring \
