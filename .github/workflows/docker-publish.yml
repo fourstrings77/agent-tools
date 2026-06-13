@@ -3,13 +3,12 @@ name: Build and Push Docker Image
 on:
   push:
     branches:
-      - main # Oder 'master' - je nachdem, wie dein Haupt-Branch heißt
+      - main
     tags:
-      - 'v*.*.*' # Trigger bei Version-Tags wie v1.0.0
+      - 'v*.*.*'
 
 env:
   REGISTRY: ghcr.io
-  # Nutzt automatisch den Namen des Repositories in Kleinbuchstaben (wichtig für GHCR)
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
@@ -23,10 +22,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # Setzt die Docker-Metadaten auf (Tags wie 'latest' oder die Commit-SHA)
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/docker-metadata-action@v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -35,7 +33,7 @@ jobs:
             type=sha,format=long
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
 
-      # Meldet sich automatisiert bei GHCR an (nutzt den Repo-Token aus den Actions)
+      # Meldet sich automatisiert bei GHCR an
       - name: Log in to the Container registry
         uses: docker/login-action@v3
         with:
@@ -54,8 +52,7 @@ jobs:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ id.meta.outputs.tags }}
-          labels: ${{ id.meta.outputs.labels }}
-          # Aktiviert automatischen Build-Cache auf GitHub, damit Folgebau-Vorgänge schneller sind
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
