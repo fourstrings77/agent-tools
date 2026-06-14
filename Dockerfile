@@ -1,46 +1,54 @@
-# 1. Das ARG muss ganz nach oben (globaler Scope)
-ARG COMPOSER_VERSION=2.8.12
+# check=skip=SecretsUsedInArgOrEnv
+FROM serversideup/php:8.3-cli
 
-# 2. Hier tricksen wir Buildx aus und weisen dem Composer-Image einen festen Alias zu
-FROM composer:${COMPOSER_VERSION} AS composer_source
+USER root
 
-# 3. Jetzt startet dein eigentliches PHP-Image
-FROM php:8.3-cli-bookworm
+ENV MYSQL_ROOT_PASSWORD=root \
+    MYSQL_DATABASE=shopware \
+    SHOW_WELCOME_MESSAGE=false
 
-ENV COMPOSER_ALLOW_SUPERUSER=1 \
-    COMPOSER_HOME=/tmp/composer \
-    PCOV_ENABLED=1 \
-    PCOV_DIRECTORY=/app
+# Install s6-overlay
+ADD https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz
+ADD https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-x86_64.tar.xz /tmp
+RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-        git \
-        unzip \
-        zip \
-        libzip-dev \
-        libicu-dev \
-        libxml2-dev \
-        libonig-dev \
-        jq \
-    && docker-php-ext-install \
-        intl \
-        mbstring \
-        opcache \
-        pdo_mysql \
-        soap \
-        zip \
-    && pecl install pcov \
-    && docker-php-ext-enable pcov \
-    && rm -rf /var/lib/apt/lists/* /tmp/pear
+# 1. PHP Extensions und MariaDB installieren
+RUN install-php-extensions gd intl pdo_mysql zip \
+    && apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+       mariadb-server \
+       mariadb-client \
+    && rm -rf /var/lib/apt/lists/*
 
-# 4. Hier kopierst du nun sauber aus dem statischen Alias statt aus der Variable
-COPY --from=composer_source /usr/bin/composer /usr/bin/composer
+RUN curl -1sLf 'https://dl.cloudsmith.io/public/friendsofshopware/stable/setup.deb.sh' | bash \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends shopware-cli \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN echo "pcov.enabled=1" > /usr/local/etc/php/conf.d/pcov.ini \
-    && echo "pcov.directory=/app" >> /usr/local/etc/php/conf.d/pcov.ini \
-    && echo "memory_limit=-1" > /usr/local/etc/php/conf.d/tooling.ini \
-    && echo "date.timezone=Europe/Berlin" >> /usr/local/etc/php/conf.d/tooling.ini
+# 2. S6 Service-Scripte kopieren
+COPY --chmod=755 .docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 
-WORKDIR /app
+# 3. CRITICAL: S6-Struktur explizit root zuweisen, damit der Service als System-Service läuft
+RUN chown -R root:root /etc/s6-overlay/s6-rc.d/ \
+    && touch /etc/s6-overlay/s6-rc.d/user/contents.d/mariadb
 
-CMD ["php", "-v"]
+# 4. Verzeichnisse vorbereiten
+RUN mkdir -p /var/run/mysqld /var/lib/mysql \
+    && chown -R mysql:mysql /var/run/mysqld /var/lib/mysql
+
+# s6 must run as root so supervised system services can prepare runtime
+# directories and drop privileges themselves.
+USER root
+
+WORKDIR /var/www/html
+RUN composer create-project shopware/production . --no-interaction --no-scripts \
+    && sed -i 's#^DATABASE_URL=.*#DATABASE_URL=mysql://root:root@127.0.0.1:3306/shopware#' .env \
+    && sed -i 's#^APP_ENV=.*#APP_ENV=dev#' .env
+
+#RUN bin/console system:install --basic-setup
+RUN composer require --dev phpstan/phpstan "phpunit/phpunit:^12.5" shopwarelabs/phpstan-shopware --no-interaction --no-progress -W
+
+
+
+CMD ["/init"]
