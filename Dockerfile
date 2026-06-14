@@ -47,7 +47,7 @@ RUN composer create-project shopware/production . --no-interaction --no-scripts 
     && sed -i 's#^APP_ENV=.*#APP_ENV=dev#' .env
 
 #RUN bin/console system:install --basic-setup
-RUN composer require --dev phpstan/phpstan "phpunit/phpunit:^12.5" shopwarelabs/phpstan-shopware --no-interaction --no-progress -W
+RUN composer require --dev phpstan/phpstan "phpunit/phpunit:^12.5" shopwarelabs/phpstan-shopware friendsofphp/php-cs-fixer --no-interaction --no-progress -W
 
 
 
