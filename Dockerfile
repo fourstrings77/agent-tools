@@ -5,7 +5,8 @@ USER root
 
 ENV MYSQL_ROOT_PASSWORD=root \
     MYSQL_DATABASE=shopware \
-    SHOW_WELCOME_MESSAGE=false
+    SHOW_WELCOME_MESSAGE=false \
+    PHP_MEMORY_LIMIT=1G
 
 # Install s6-overlay
 ADD https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-overlay-noarch.tar.xz /tmp
@@ -14,7 +15,7 @@ ADD https://github.com/just-containers/s6-overlay/releases/download/v3.2.3.0/s6-
 RUN tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz
 
 # 1. PHP Extensions und MariaDB installieren
-RUN install-php-extensions gd intl pdo_mysql zip \
+RUN install-php-extensions gd intl pcov \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        mariadb-server \
