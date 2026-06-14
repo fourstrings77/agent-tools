@@ -1,0 +1,50 @@
+#!/command/with-contenv bash
+set -e
+
+echo "[S6-MariaDB] Starting initialization checks..."
+
+mkdir -p /run/mysqld
+chown -R mysql:mysql /run/mysqld /var/lib/mysql
+chmod 775 /run/mysqld
+
+if ! [[ "${MYSQL_DATABASE}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    echo "[S6-MariaDB] MYSQL_DATABASE may only contain letters, numbers, and underscores."
+    exit 1
+fi
+
+if [ ! -d "/var/lib/mysql/mysql" ]; then
+    echo "[S6-MariaDB] Initializing MariaDB data directory..."
+    mysql_install_db --user=mysql --datadir=/var/lib/mysql --auth-root-authentication-method=normal > /dev/null
+fi
+
+echo "[S6-MariaDB] Starting temporary server for setup..."
+mysqld --user=mysql --datadir=/var/lib/mysql --pid-file=/run/mysqld/mysqld.pid --socket=/run/mysqld/mysqld.sock --skip-networking &
+temp_pid="$!"
+
+echo "[S6-MariaDB] Waiting for temporary server socket..."
+for i in {1..30}; do
+    if mysqladmin ping -u root --password="${MYSQL_ROOT_PASSWORD}" --socket=/run/mysqld/mysqld.sock --silent || mysqladmin ping -u root --socket=/run/mysqld/mysqld.sock --silent; then
+        break
+    fi
+    sleep 1
+done
+
+if ! mysqladmin ping -u root --password="${MYSQL_ROOT_PASSWORD}" --socket=/run/mysqld/mysqld.sock --silent && ! mysqladmin ping -u root --socket=/run/mysqld/mysqld.sock --silent; then
+    echo "[S6-MariaDB] Temporary server did not become ready."
+    kill "$temp_pid" || true
+    wait "$temp_pid" || true
+    exit 1
+fi
+
+sql_root_password="${MYSQL_ROOT_PASSWORD//\'/\'\'}"
+setup_sql="ALTER USER 'root'@'localhost' IDENTIFIED BY '${sql_root_password}'; CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '${sql_root_password}'; GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION; CREATE DATABASE IF NOT EXISTS \`${MYSQL_DATABASE}\`; FLUSH PRIVILEGES;"
+
+if ! mysql -u root --password="${MYSQL_ROOT_PASSWORD}" --socket=/run/mysqld/mysqld.sock -e "${setup_sql}"; then
+    mysql -u root --socket=/run/mysqld/mysqld.sock -e "${setup_sql}"
+fi
+
+mysqladmin shutdown -u root --password="${MYSQL_ROOT_PASSWORD}" --socket=/run/mysqld/mysqld.sock || mysqladmin shutdown -u root --socket=/run/mysqld/mysqld.sock
+wait "$temp_pid"
+
+echo "[S6-MariaDB] Launching mysqld daemon..."
+exec mysqld --user=mysql --datadir=/var/lib/mysql --pid-file=/run/mysqld/mysqld.pid --socket=/run/mysqld/mysqld.sock
